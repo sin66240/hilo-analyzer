@@ -17,18 +17,32 @@ st.set_page_config(
 # --------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# กำหนดคอลัมน์มาตรฐาน
+COLUMNS = ["Timestamp", "Dice1", "Dice2", "Dice3", "Total", "HiLo", "OddEven"]
+
 def load_data():
-    """โหลดข้อมูลจาก Google Sheets"""
+    """ดึงข้อมูลจาก Google Sheets และจัดการความถูกต้องของคอลัมน์"""
     try:
         df = conn.read(ttl=0)
-        # ตรวจสอบว่ามีคอลัมน์หลักครบถ้วนไหม
-        required_cols = ["Timestamp", "Dice1", "Dice2", "Dice3", "Total", "HiLo", "OddEven"]
-        for col in required_cols:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=COLUMNS)
+        
+        # ตรวจสอบคอลัมน์ให้ครบถ้วน
+        for col in COLUMNS:
             if col not in df.columns:
                 df[col] = None
+                
+        # แปลงชนิดข้อมูลตัวเลข
+        df["Dice1"] = pd.to_numeric(df["Dice1"], errors='coerce')
+        df["Dice2"] = pd.to_numeric(df["Dice2"], errors='coerce')
+        df["Dice3"] = pd.to_numeric(df["Dice3"], errors='coerce')
+        df["Total"] = pd.to_numeric(df["Total"], errors='coerce')
+        
+        # ลบแถวที่ไม่มีข้อมูล
+        df = df.dropna(subset=["Total"])
         return df
     except Exception:
-        return pd.DataFrame(columns=["Timestamp", "Dice1", "Dice2", "Dice3", "Total", "HiLo", "OddEven"])
+        return pd.DataFrame(columns=COLUMNS)
 
 def save_data(df):
     """บันทึกข้อมูลกลับลง Google Sheets"""
@@ -67,29 +81,29 @@ st.subheader("📌 1. บันทึกผลลูกเต๋า")
 col_in1, col_in2, col_in3, col_btn = st.columns([2, 2, 2, 2])
 
 with col_in1:
-    d1 = st.selectbox("ลูกที่ 1", options=[1, 2, 3, 4, 5, 6], index=0)
+    d1 = st.selectbox("ลูกที่ 1", options=[1, 2, 3, 4, 5, 6], index=0, key="d1")
 with col_in2:
-    d2 = st.selectbox("ลูกที่ 2", options=[1, 2, 3, 4, 5, 6], index=0)
+    d2 = st.selectbox("ลูกที่ 2", options=[1, 2, 3, 4, 5, 6], index=0, key="d2")
 with col_in3:
-    d3 = st.selectbox("ลูกที่ 3", options=[1, 2, 3, 4, 5, 6], index=0)
+    d3 = st.selectbox("ลูกที่ 3", options=[1, 2, 3, 4, 5, 6], index=0, key="d3")
 
 with col_btn:
     st.write("") # Spacing
     st.write("")
     if st.button("💾 บันทึกผล", type="primary", use_container_width=True):
-        total = d1 + d2 + d3
+        total = int(d1 + d2 + d3)
         hilo_res = calculate_hilo(total)
         odd_even_res = calculate_odd_even(total)
         timestamp = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
 
         new_row = pd.DataFrame([{
-            "Timestamp": timestamp,
-            "Dice1": d1,
-            "Dice2": d2,
-            "Dice3": d3,
-            "Total": total,
-            "HiLo": hilo_res,
-            "OddEven": odd_even_res
+            "Timestamp": str(timestamp),
+            "Dice1": int(d1),
+            "Dice2": int(d2),
+            "Dice3": int(d3),
+            "Total": int(total),
+            "HiLo": str(hilo_res),
+            "OddEven": str(odd_even_res)
         }])
 
         df_updated = pd.concat([df_history, new_row], ignore_index=True)
@@ -110,9 +124,6 @@ if not df_history.empty and len(df_history) > 0:
     low_count = len(df_history[df_history["HiLo"] == "ต่ำ"])
     hilo11_count = len(df_history[df_history["HiLo"] == "11 ไฮโล"])
 
-    odd_count = len(df_history[df_history["OddEven"] == "คี่"])
-    even_count = len(df_history[df_history["OddEven"] == "คู่"])
-
     # Metrics
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("จำนวนรอบทั้งหมด", f"{total_rounds} รอบ")
@@ -127,10 +138,10 @@ if not df_history.empty and len(df_history) > 0:
 
     with col_chart1:
         # HiLo Distribution Chart
-        hilo_df = df_history["HiLo"].value_counts().reset_index()
-        hilo_df.columns = ["ผลลัพธ์", "จำนวน"]
+        hilo_counts = df_history["HiLo"].value_counts().reset_index()
+        hilo_counts.columns = ["ผลลัพธ์", "จำนวน"]
         fig_hilo = px.pie(
-            hilo_df, 
+            hilo_counts, 
             values="จำนวน", 
             names="ผลลัพธ์", 
             title="สัดส่วน สูง / ต่ำ / 11 ไฮโล",
@@ -171,12 +182,12 @@ if not df_history.empty and len(df_history) > 0:
 
     with col_btn2:
         if st.button("⚠️ ล้างประวัติทั้งหมด", type="secondary", use_container_width=True):
-            empty_df = pd.DataFrame(columns=["Timestamp", "Dice1", "Dice2", "Dice3", "Total", "HiLo", "OddEven"])
+            empty_df = pd.DataFrame(columns=COLUMNS)
             save_data(empty_df)
             st.warning("ล้างประวัติข้อมูลเรียบร้อย!")
             st.rerun()
 
-    # Display DataFrame (Reversed order to show latest first)
+    # แสดงตารางเรียงจากล่าสุดขึ้นก่อน
     st.dataframe(df_history.iloc[::-1], use_container_width=True)
 
 else:
