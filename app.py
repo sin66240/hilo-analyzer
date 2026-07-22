@@ -18,13 +18,11 @@ def load_data():
         if df is None or df.empty:
             return pd.DataFrame(columns=["ตาที่ (Round)", "ลูกที่ 1", "ลูกที่ 2", "ลูกที่ 3"])
         
-        # ตรวจสอบคอลัมน์มาตรฐาน
         required_cols = ["ตาที่ (Round)", "ลูกที่ 1", "ลูกที่ 2", "ลูกที่ 3"]
         for col in required_cols:
             if col not in df.columns:
                 df[col] = None
                 
-        # แปลงชนิดข้อมูลตัวเลข
         df["ตาที่ (Round)"] = pd.to_numeric(df["ตาที่ (Round)"], errors='coerce')
         df["ลูกที่ 1"] = pd.to_numeric(df["ลูกที่ 1"], errors='coerce')
         df["ลูกที่ 2"] = pd.to_numeric(df["ลูกที่ 2"], errors='coerce')
@@ -46,14 +44,12 @@ st.session_state['dice_data'] = load_data()
 # --- 🎨 CUSTOM LIGHT THEME WITH NEON GLOW TEXT ---
 st.markdown("""
 <style>
-    /* พื้นหลังหลักสไตล์สว่าง สะอาดตา คลีนๆ */
     .stApp {
         background-color: #f8fafc;
         color: #0f172a;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
-    /* ข้อความวิ่งสไลด์ใหญ่ๆ ด้านบนสุด */
     .marquee-container {
         width: 100%;
         overflow: hidden;
@@ -80,13 +76,11 @@ st.markdown("""
         100% { transform: translateX(100vw); }
     }
     
-    /* ตกแต่ง Sidebar โทนสว่างนุ่มนวล */
     [data-testid="stSidebar"] {
         background-color: #ffffff;
         border-right: 1px solid #e2e8f0;
     }
     
-    /* หัวข้อหลักแบบไล่เฉดสีเน้นความเด่น */
     h1 {
         background: linear-gradient(90deg, #2563eb, #7c3aed);
         -webkit-background-clip: text;
@@ -95,7 +89,6 @@ st.markdown("""
         letter-spacing: -0.5px;
     }
     
-    /* การ์ดสรุปคำแนะนำเดิมพันโทนขาว พร้อมเงาและขอบเรืองแสง (Glow) */
     .glow-card {
         background: #ffffff;
         border-radius: 14px;
@@ -109,7 +102,6 @@ st.markdown("""
         transform: translateY(-4px);
     }
     
-    /* เอฟเฟกต์ตัวอักษรและขอบเรืองแสงแบ่งตามประเภท */
     .card-single { 
         border-top: 4px solid #f59e0b; 
         box-shadow: 0 8px 20px -4px rgba(245, 158, 11, 0.25);
@@ -196,7 +188,6 @@ st.markdown("""
         line-height: 1.5;
     }
 
-    /* ตกแต่ง Tabs สไตล์สว่าง */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -215,7 +206,6 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
     }
 
-    /* ตกแต่งปุ่มกด */
     .stButton>button {
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         color: #ffffff;
@@ -272,11 +262,9 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎯 ตั้งค่าการคัดกรอง (Filter)")
 recent_n = st.sidebar.slider("ช่วงตาสั้นเพื่อวิเคราะห์แนวโน้ม (Moving Avg):", 5, 30, 10)
 
-# เกณฑ์การกรองตาเล่นเพื่อดัน Win Rate เกิน 50%
 confidence_threshold = st.sidebar.slider("เกณฑ์ความมั่นใจขั้นต่ำเพื่อสั่งแทง (%):", 40.0, 60.0, 48.0, 0.5) / 100.0
 
 st.sidebar.markdown("---")
-# ปุ่มลบรายการล่าสุดบน Sidebar
 if st.sidebar.button("🗑️ ลบรายการล่าสุด"):
     current_df = load_data()
     if not current_df.empty:
@@ -288,7 +276,6 @@ if st.sidebar.button("🗑️ ลบรายการล่าสุด"):
     else:
         st.sidebar.warning("ไม่มีข้อมูลให้ลบครับ")
 
-# ปุ่มล้างประวัติข้อมูลทั้งหมด
 if st.sidebar.button("⚠️ ล้างประวัติข้อมูลทั้งหมด"):
     empty_df = pd.DataFrame(columns=["ตาที่ (Round)", "ลูกที่ 1", "ลูกที่ 2", "ลูกที่ 3"])
     save_data(empty_df)
@@ -356,10 +343,10 @@ if not raw_df.empty:
 
     top_cold_face = max(last_seen, key=last_seen.get)
 
-    # --- 🧮 NEW PROBABILITY & SKIP FILTER LOGIC (สูตรดึง WIN RATE เกิน 50%) ---
-    # คำนวณความถี่แบบ Exponential Weights ย้อนหลัง
+    # --- 🧮 SMART & SHARP SKIP FILTER LOGIC ---
     n_recent = min(total_rounds, recent_n)
-    weights = np.exp(np.linspace(-1, 0, n_recent))
+    
+    weights = np.exp(np.linspace(-2.0, 0, n_recent))
     weights /= weights.sum()
 
     recent_rounds = df.tail(n_recent)
@@ -370,19 +357,30 @@ if not raw_df.empty:
         for die in d_list:
             weighted_counts[die] += weights[idx]
 
+    counts_array = list(weighted_counts.values())
+    mean_c = np.mean(counts_array)
+    std_c = np.std(counts_array) if np.std(counts_array) > 0 else 1.0
+
     estimated_probs = {}
+    z_scores = {}
+    
     for num in range(1, 7):
         p_single = weighted_counts[num] / 3.0
-        p_single = max(0.05, min(0.30, p_single))
-        p_win = 1.0 - ((1.0 - p_single) ** 3)
+        cold_bonus = 0.02 if last_seen[num] >= 6 else 0.0
+        p_single_adjusted = max(0.05, min(0.35, p_single + cold_bonus))
+        p_win = 1.0 - ((1.0 - p_single_adjusted) ** 3)
         estimated_probs[num] = p_win
+        z_scores[num] = (weighted_counts[num] - mean_c) / std_c
 
-    # หาเลขที่มี Confidence สูงสุด
     top_short_face = max(estimated_probs, key=estimated_probs.get)
     best_confidence = estimated_probs[top_short_face]
+    best_z = z_scores[top_short_face]
 
-    # ตัดสินใจ Action: BET หรือ SKIP
-    if best_confidence >= confidence_threshold:
+    # --- 🎯 UPDATED SEPARATE BET LOGIC (ปรับตรรกะใหม่ตามกติกาจริง) ---
+    is_stat_significance = best_z >= 0.8 or last_seen[top_short_face] >= 7
+    
+    # การแทงเต็งไม่กลัวตอง/11 ไฮโล
+    if (best_confidence >= confidence_threshold) and is_stat_significance:
         single_action = "BET"
         single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
         single_winrate = (single_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
@@ -390,7 +388,11 @@ if not raw_df.empty:
         single_action = "SKIP"
         single_winrate = best_confidence * 100
 
-    # --- 📈 WIN RATE CALCULATIONS (อื่นๆ) ---
+    # ประเมินความเสี่ยง ตอง / 11 ไฮโล (สำหรับคำแนะนำ สูง-ต่ำ)
+    triple_count = (df["ผลลัพธ์ (Result)"] == "ตอง (Triple)").sum()
+    risk_of_eleven_or_triple = (eleven_pct > 12.5) or (triple_count > 0 and (total_rounds - df[df["ผลลัพธ์ (Result)"] == "ตอง (Triple)"].index[-1]) <= 5 if triple_count > 0 else False)
+
+    # --- 📈 WIN RATE CALCULATIONS ---
     pair_win_rounds = pair_counts.get(best_pair, 0)
     pair_winrate = (pair_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
 
@@ -410,7 +412,7 @@ if not raw_df.empty:
                 <div class="card-main-val">🎯 เต็งแต้ม {top_short_face}</div>
                 <div class="card-winrate">🎯 Conf: {best_confidence*100:.1f}% (WinRate: {single_winrate:.1f}%)</div>
                 <div class="card-desc">
-                    • <b>สถานะ:</b> <span style="color: #059669; font-weight: bold;">เข้าเงื่อนไขเดิมพัน</span><br>
+                    • <b>สถานะ:</b> <span style="color: #059669; font-weight: bold;">เข้าเงื่อนไข (ออกตอง/11 ก็ยังได้)</span><br>
                     • <b>ชนะในเกม:</b> ออกแล้ว {single_win_rounds} จาก {total_rounds} ตา<br>
                     • <b>สายดึงกลับ:</b> แต้ม {top_cold_face} เงียบมา {last_seen[top_cold_face]} ตา
                 </div>
@@ -421,11 +423,11 @@ if not raw_df.empty:
             <div class="glow-card card-single-skip">
                 <div class="card-title">🎲 เต็งเด่น (Single)</div>
                 <div class="card-main-val">⏸️ SKIP (ข้าม)</div>
-                <div class="card-status-skip">⚠️ Conf สูงสุด: {best_confidence*100:.1f}% (ต่ำกว่าเกณฑ์)</div>
+                <div class="card-status-skip">⚠️ Conf: {best_confidence*100:.1f}% (ไม่ผ่าน Double-Gate)</div>
                 <div class="card-desc">
-                    • <b>สถานะ:</b> <span style="color: #d97706; font-weight: bold;">ความมั่นใจยังไม่ถึง {confidence_threshold*100:.0f}%</span><br>
-                    • <b>คำแนะนำ:</b> ควรงดแทงตาเต็งเด่นตานี้เพื่อรักษา Win Rate รวม<br>
-                    • <b>แต้มโดดเด่นสุด:</b> แต้ม {top_short_face} (ควรรอก่อน)
+                    • <b>สถานะ:</b> <span style="color: #d97706; font-weight: bold;">ทรงเต๋ายังไม่นิ่ง ชะลอเดิมพัน</span><br>
+                    • <b>คำแนะนำ:</b> ข้ามตานี้ไปก่อนเพื่อรักษา Win Rate รวม<br>
+                    • <b>แต้มจับตาดู:</b> แต้ม {top_short_face} (รอกระแสติดอีกนิด)
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -457,15 +459,21 @@ if not raw_df.empty:
         """, unsafe_allow_html=True)
 
     with rec_col4:
-        eleven_status = "🔥 ออกถี่พิเศษ" if eleven_pct > 12.5 else "⚖️ ออกตามเกณฑ์ปกติ"
+        if risk_of_eleven_or_triple:
+            eleven_status = "⚠️ เสี่ยง 11 ไฮโล/ตอง สูง"
+            eleven_desc = "เน้น **แทงเต็ง** ปลอดภัยกว่าแทง **สูง/ต่ำ**"
+        else:
+            eleven_status = "⚖️ ออกตามเกณฑ์ปกติ"
+            eleven_desc = f"ออกไปแล้ว {eleven_count} ครั้ง สภาวะปกติเล่นได้"
+
         st.markdown(f"""
         <div class="glow-card card-eleven">
-            <div class="card-title">💥 11 ไฮโล (Total 11)</div>
+            <div class="card-title">💥 11 ไฮโล / ความเสี่ยง (Risk)</div>
             <div class="card-main-val">{eleven_pct:.1f}%</div>
-            <div class="card-winrate">🎯 Win Rate: {eleven_pct:.1f}%</div>
+            <div class="card-winrate">🎯 {eleven_status}</div>
             <div class="card-desc">
-                • <b>จำนวนครั้ง:</b> ออกไปแล้ว {eleven_count} ครั้ง<br>
-                • <b>สถานะ:</b> {eleven_status}
+                • <b>คำแนะนำ:</b> {eleven_desc}<br>
+                • <b>จำนวนครั้ง:</b> ออกแล้ว {eleven_count} ครั้ง จาก {total_rounds} ตา
             </div>
         </div>
         """, unsafe_allow_html=True)
