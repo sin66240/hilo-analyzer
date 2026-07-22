@@ -157,7 +157,18 @@ st.markdown("""
     .card-main-val {
         font-size: 1.8rem;
         font-weight: 800;
+        margin-bottom: 6px;
+    }
+    .card-winrate {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #10b981;
+        background: #ecfdf5;
+        padding: 4px 10px;
+        border-radius: 20px;
+        display: inline-block;
         margin-bottom: 10px;
+        border: 1px solid #a7f3d0;
     }
     .card-desc {
         font-size: 0.85rem;
@@ -321,6 +332,19 @@ if not raw_df.empty:
     top_short_face = short_counts.sort_values(ascending=False).index[0]
     top_cold_face = max(last_seen, key=last_seen.get)
 
+    # --- 📈 WIN RATE CALCULATIONS ---
+    # 1. เต็งเด่น Win Rate (คำนวณจำนวนตาที่มีแต้มนี้ออกอย่างน้อย 1 ลูก)
+    single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
+    single_winrate = (single_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
+
+    # 2. โต๊ดคู่ Win Rate (จำนวนตาที่คู่นี้ออกพร้อมกัน)
+    pair_win_rounds = pair_counts.get(best_pair, 0)
+    pair_winrate = (pair_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
+
+    # 3. โต๊ดผสม Win Rate (จำนวนตาที่เกิดชุดโต๊ดผสมนี้)
+    mix_win_rounds = combo_mix.get(best_combo, 0)
+    mix_winrate = (mix_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
+
     # --- 4. LIGHT NEON SUMMARY RECOMMENDATIONS DASHBOARD ---
     st.markdown("### 🎯 สรุปตัวเลือกเดิมพันแนะนำ")
     
@@ -331,8 +355,9 @@ if not raw_df.empty:
         <div class="glow-card card-single">
             <div class="card-title">🎲 เต็งเด่น (Single)</div>
             <div class="card-main-val">เต็งแต้ม {top_short_face}</div>
+            <div class="card-winrate">🎯 Win Rate: {single_winrate:.1f}%</div>
             <div class="card-desc">
-                • <b>ตามกระแส:</b> หน้า {top_short_face} ฮอตสุดใน {recent_n} ตา<br>
+                • <b>ชนะในเกม:</b> ออกแล้ว {single_win_rounds} จาก {total_rounds} ตา<br>
                 • <b>สายดึงกลับ:</b> แต้ม {top_cold_face} เงียบมา {last_seen[top_cold_face]} ตา
             </div>
         </div>
@@ -343,9 +368,10 @@ if not raw_df.empty:
         <div class="glow-card card-pair">
             <div class="card-title">👯 โต๊ดคู่ (Pair)</div>
             <div class="card-main-val">คู่ {best_pair[0]} - {best_pair[1]}</div>
+            <div class="card-winrate">🎯 Win Rate: {pair_winrate:.1f}%</div>
             <div class="card-desc">
-                • <b>สถิติดีที่สุด:</b> ออกคู่กัน {pair_counts.get(best_pair, 0)} ตา<br>
-                • <b>คิดเป็น:</b> {(pair_counts.get(best_pair, 0)/total_rounds)*100:.1f}% ของเกมทั้งหมด
+                • <b>ชนะในเกม:</b> ออกคู่กัน {pair_win_rounds} จาก {total_rounds} ตา<br>
+                • <b>ความฮอต:</b> เป็นคู่ที่สถิติสูงที่สุดในขณะนี้
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -355,8 +381,9 @@ if not raw_df.empty:
         <div class="glow-card card-mix">
             <div class="card-title">🎰 โต๊ดผสม (Mix)</div>
             <div class="card-main-val">{best_combo}</div>
+            <div class="card-winrate">🎯 Win Rate: {mix_winrate:.1f}%</div>
             <div class="card-desc">
-                • <b>คู่หน้า-ผลรวม:</b> ออกถี่สุด {combo_mix.get(best_combo, 0)} ครั้ง<br>
+                • <b>ชนะในเกม:</b> ออกตรงกัน {mix_win_rounds} จาก {total_rounds} ตา<br>
                 • <b>แนะนำ:</b> เดิมพันควบหน้าเต๋ากับสูง/ต่ำ
             </div>
         </div>
@@ -368,6 +395,7 @@ if not raw_df.empty:
         <div class="glow-card card-eleven">
             <div class="card-title">💥 11 ไฮโล (Total 11)</div>
             <div class="card-main-val">{eleven_pct:.1f}%</div>
+            <div class="card-winrate">🎯 Win Rate: {eleven_pct:.1f}%</div>
             <div class="card-desc">
                 • <b>จำนวนครั้ง:</b> ออกไปแล้ว {eleven_count} ครั้ง<br>
                 • <b>สถานะ:</b> {eleven_status}
