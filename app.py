@@ -119,6 +119,15 @@ st.markdown("""
         text-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
     }
     
+    .card-single-skip { 
+        border-top: 4px solid #64748b; 
+        box-shadow: 0 8px 20px -4px rgba(100, 116, 139, 0.2);
+        background: #f1f5f9;
+    }
+    .card-single-skip .card-main-val {
+        color: #475569;
+    }
+    
     .card-pair { 
         border-top: 4px solid #2563eb; 
         box-shadow: 0 8px 20px -4px rgba(37, 99, 235, 0.25);
@@ -170,6 +179,17 @@ st.markdown("""
         margin-bottom: 10px;
         border: 1px solid #a7f3d0;
     }
+    .card-status-skip {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #d97706;
+        background: #fffbe2;
+        padding: 4px 10px;
+        border-radius: 20px;
+        display: inline-block;
+        margin-bottom: 10px;
+        border: 1px solid #fde68a;
+    }
     .card-desc {
         font-size: 0.85rem;
         color: #475569;
@@ -220,7 +240,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎲 HI-LO STATISTICAL ANALYZER")
-st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎีประมวลผลเรียลไทม์ | สรุปช้อยส์เดิมพันเด่น (Google Sheets Real-time)")
+st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎีประมวลผลเรียลไทม์ + ระบบกรองตาเล่น Skip Filter | สรุปช้อยส์เดิมพันเด่น (Google Sheets Real-time)")
 
 # --- 2. SIDEBAR - FAST INPUT & SLIDER ---
 st.sidebar.markdown("### ⚡ บันทึกข้อมูลรวดเร็ว")
@@ -249,8 +269,13 @@ if st.sidebar.button("📥 บันทึกชุดตัวเลข"):
             st.rerun()
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎯 ตั้งค่าการคัดกรอง (Filter)")
 recent_n = st.sidebar.slider("ช่วงตาสั้นเพื่อวิเคราะห์แนวโน้ม (Moving Avg):", 5, 30, 10)
 
+# เกณฑ์การกรองตาเล่นเพื่อดัน Win Rate เกิน 50%
+confidence_threshold = st.sidebar.slider("เกณฑ์ความมั่นใจขั้นต่ำเพื่อสั่งแทง (%):", 40.0, 60.0, 48.0, 0.5) / 100.0
+
+st.sidebar.markdown("---")
 # ปุ่มลบรายการล่าสุดบน Sidebar
 if st.sidebar.button("🗑️ ลบรายการล่าสุด"):
     current_df = load_data()
@@ -329,19 +354,46 @@ if not raw_df.empty:
     low_faces = long_counts[1] + long_counts[2] + long_counts[3]
     high_faces = long_counts[4] + long_counts[5] + long_counts[6]
 
-    top_short_face = short_counts.sort_values(ascending=False).index[0]
     top_cold_face = max(last_seen, key=last_seen.get)
 
-    # --- 📈 WIN RATE CALCULATIONS ---
-    # 1. เต็งเด่น Win Rate (คำนวณจำนวนตาที่มีแต้มนี้ออกอย่างน้อย 1 ลูก)
-    single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
-    single_winrate = (single_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
+    # --- 🧮 NEW PROBABILITY & SKIP FILTER LOGIC (สูตรดึง WIN RATE เกิน 50%) ---
+    # คำนวณความถี่แบบ Exponential Weights ย้อนหลัง
+    n_recent = min(total_rounds, recent_n)
+    weights = np.exp(np.linspace(-1, 0, n_recent))
+    weights /= weights.sum()
 
-    # 2. โต๊ดคู่ Win Rate (จำนวนตาที่คู่นี้ออกพร้อมกัน)
+    recent_rounds = df.tail(n_recent)
+    weighted_counts = {num: 0.0 for num in range(1, 7)}
+    
+    for idx, (_, row) in enumerate(recent_rounds.iterrows()):
+        d_list = [row["ลูกที่ 1"], row["ลูกที่ 2"], row["ลูกที่ 3"]]
+        for die in d_list:
+            weighted_counts[die] += weights[idx]
+
+    estimated_probs = {}
+    for num in range(1, 7):
+        p_single = weighted_counts[num] / 3.0
+        p_single = max(0.05, min(0.30, p_single))
+        p_win = 1.0 - ((1.0 - p_single) ** 3)
+        estimated_probs[num] = p_win
+
+    # หาเลขที่มี Confidence สูงสุด
+    top_short_face = max(estimated_probs, key=estimated_probs.get)
+    best_confidence = estimated_probs[top_short_face]
+
+    # ตัดสินใจ Action: BET หรือ SKIP
+    if best_confidence >= confidence_threshold:
+        single_action = "BET"
+        single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
+        single_winrate = (single_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
+    else:
+        single_action = "SKIP"
+        single_winrate = best_confidence * 100
+
+    # --- 📈 WIN RATE CALCULATIONS (อื่นๆ) ---
     pair_win_rounds = pair_counts.get(best_pair, 0)
     pair_winrate = (pair_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
 
-    # 3. โต๊ดผสม Win Rate (จำนวนตาที่เกิดชุดโต๊ดผสมนี้)
     mix_win_rounds = combo_mix.get(best_combo, 0)
     mix_winrate = (mix_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
 
@@ -351,17 +403,32 @@ if not raw_df.empty:
     rec_col1, rec_col2, rec_col3, rec_col4 = st.columns(4)
     
     with rec_col1:
-        st.markdown(f"""
-        <div class="glow-card card-single">
-            <div class="card-title">🎲 เต็งเด่น (Single)</div>
-            <div class="card-main-val">เต็งแต้ม {top_short_face}</div>
-            <div class="card-winrate">🎯 Win Rate: {single_winrate:.1f}%</div>
-            <div class="card-desc">
-                • <b>ชนะในเกม:</b> ออกแล้ว {single_win_rounds} จาก {total_rounds} ตา<br>
-                • <b>สายดึงกลับ:</b> แต้ม {top_cold_face} เงียบมา {last_seen[top_cold_face]} ตา
+        if single_action == "BET":
+            st.markdown(f"""
+            <div class="glow-card card-single">
+                <div class="card-title">🎲 เต็งเด่น (Single)</div>
+                <div class="card-main-val">🎯 เต็งแต้ม {top_short_face}</div>
+                <div class="card-winrate">🎯 Conf: {best_confidence*100:.1f}% (WinRate: {single_winrate:.1f}%)</div>
+                <div class="card-desc">
+                    • <b>สถานะ:</b> <span style="color: #059669; font-weight: bold;">เข้าเงื่อนไขเดิมพัน</span><br>
+                    • <b>ชนะในเกม:</b> ออกแล้ว {single_win_rounds} จาก {total_rounds} ตา<br>
+                    • <b>สายดึงกลับ:</b> แต้ม {top_cold_face} เงียบมา {last_seen[top_cold_face]} ตา
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="glow-card card-single-skip">
+                <div class="card-title">🎲 เต็งเด่น (Single)</div>
+                <div class="card-main-val">⏸️ SKIP (ข้าม)</div>
+                <div class="card-status-skip">⚠️ Conf สูงสุด: {best_confidence*100:.1f}% (ต่ำกว่าเกณฑ์)</div>
+                <div class="card-desc">
+                    • <b>สถานะ:</b> <span style="color: #d97706; font-weight: bold;">ความมั่นใจยังไม่ถึง {confidence_threshold*100:.0f}%</span><br>
+                    • <b>คำแนะนำ:</b> ควรงดแทงตาเต็งเด่นตานี้เพื่อรักษา Win Rate รวม<br>
+                    • <b>แต้มโดดเด่นสุด:</b> แต้ม {top_short_face} (ควรรอก่อน)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with rec_col2:
         st.markdown(f"""
@@ -418,12 +485,15 @@ if not raw_df.empty:
         t_col1, t_col2 = st.columns(2)
         
         with t_col1:
-            st.markdown("#### 1️⃣ Moving Average (แนวโน้มช่วงสั้น)")
-            st.dataframe(pd.DataFrame({
+            st.markdown("#### 1️⃣ Moving Average & Confidence (แนวโน้มและความน่าจะเป็น)")
+            
+            prob_df = pd.DataFrame({
                 "หน้าเต๋า": [f"แต้ม {i}" for i in range(1, 7)],
                 "ออกช่วงสั้น": [short_counts[i] for i in range(1, 7)],
-                "ออกภาพรวม": [long_counts[i] for i in range(1, 7)]
-            }), use_container_width=True)
+                "ออกภาพรวม": [long_counts[i] for i in range(1, 7)],
+                "ความน่าจะเป็นตาถัดไป": [f"{estimated_probs[i]*100:.1f}%" for i in range(1, 7)]
+            })
+            st.dataframe(prob_df, use_container_width=True)
 
             st.markdown("#### 2️⃣ Law of Large Numbers (ดึงเข้าสู่ค่าเฉลี่ย)")
             cold_df = pd.DataFrame({
