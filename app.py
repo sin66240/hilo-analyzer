@@ -230,7 +230,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎲 HI-LO STATISTICAL ANALYZER")
-st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎีประมวลผลเรียลไทม์ + EMA/Kelly Pair Engine | สรุปช้อยส์เดิมพันเด่น (Google Sheets Real-time)")
+st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎีประมวลผลเรียลไทม์ + ระบบกรองตาเล่น Skip Filter | สรุปช้อยส์เดิมพันเด่น (Google Sheets Real-time)")
 
 # --- 2. SIDEBAR - FAST INPUT & SLIDER ---
 st.sidebar.markdown("### ⚡ บันทึกข้อมูลรวดเร็ว")
@@ -257,11 +257,6 @@ if st.sidebar.button("📥 บันทึกชุดตัวเลข"):
             st.session_state['dice_data'] = updated_df
             st.sidebar.success(f"บันทึกสำเร็จ {len(matches)} ตา!")
             st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💰 บริหารเงินทุน (Money Management)")
-bankroll = st.sidebar.number_input("เงินทุนปัจจุบัน (บาท):", min_value=100, value=1000, step=100)
-ema_alpha = st.sidebar.slider("น้ำหนักเทรนด์ระยะสั้น (EMA Alpha):", 0.1, 0.4, 0.2, 0.05)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🎯 ตั้งค่าการคัดกรอง (Filter)")
@@ -336,65 +331,8 @@ if not raw_df.empty:
                 label = f"{face}-{res.split()[0]}"
                 combo_mix[label] = combo_mix.get(label, 0) + 1
 
-    # --- 🔥 🔥 🔥 NEW: EMA & KELLY ENGINE FOR PAIRS 🔥 🔥 🔥 ---
-    all_pairs = [(i, j) for i in range(1, 7) for j in range(i+1, 7)]
-    pair_ema_stats = {}
-    base_payout = 5.0  # อัตราจ่ายโต๊ด 5 เท่า (ไม่รวมทุน)
-
-    for p in all_pairs:
-        pair_set = set(p)
-        ema = 0.1389  # ค่าความน่าจะเป็นทางทฤษฎีเริ่มต้น
-        streak = 0
-        
-        # คำนวณ EMA และ Streak ย้อนหลังตั้งแต่ตาแรกจนถึงปัจจุบัน
-        for _, row in df.iterrows():
-            roll_set = set([row["ลูกที่ 1"], row["ลูกที่ 2"], row["ลูกที่ 3"]])
-            is_hit = 1.0 if pair_set.issubset(roll_set) else 0.0
-            
-            if is_hit == 1.0:
-                streak = 0
-            else:
-                streak += 1
-                
-            ema = (is_hit * ema_alpha) + (ema * (1.0 - ema_alpha))
-
-        # คำนวณ Kelly Criterion
-        kelly_f = (base_payout * ema - (1.0 - ema)) / base_payout
-        
-        # ประเมินสัญญาณการแทง
-        signal = "SKIP"
-        reason = ""
-        bet_amount = 0
-
-        if streak >= 6:
-            signal = "BET"
-            reason = f"🔥 หายไปนาน {streak} ตาติด (เข้าช่วงสถิติกลับมาออก)"
-        elif ema >= 0.20:
-            signal = "BET"
-            reason = f"⚡ เต๋ากำลังไหลแรง (EMA: {ema*100:.1f}%)"
-        else:
-            signal = "SKIP"
-            reason = "สถิติยังอยู่ในช่วงปกติ"
-
-        if signal == "BET":
-            # ใช้ Fractional Kelly (25%) เพื่อป้องกันความเสี่ยง
-            safe_ratio = max(0.02, kelly_f * 0.25) if kelly_f > 0 else 0.02
-            calc_bet = round(bankroll * safe_ratio)
-            bet_amount = max(10, min(calc_bet, round(bankroll * 0.10)))
-
-        pair_ema_stats[p] = {
-            "ema": ema,
-            "streak": streak,
-            "signal": signal,
-            "reason": reason,
-            "bet_amount": bet_amount,
-            "hits": pair_counts.get(p, 0)
-        }
-
-    # เลือกคู่โต๊ดเด่นที่สุดจาก EMA / BET Signal
-    best_pair = max(all_pairs, key=lambda x: (pair_ema_stats[x]["signal"] == "BET", pair_ema_stats[x]["ema"], pair_counts.get(x, 0)))
-    best_pair_info = pair_ema_stats[best_pair]
-
+    sorted_pairs = sorted(pair_counts.items(), key=lambda x: x[1], reverse=True)
+    best_pair = sorted_pairs[0][0] if sorted_pairs else (1, 2)
     sorted_combos = sorted(combo_mix.items(), key=lambda x: x[1], reverse=True)
     best_combo = sorted_combos[0][0] if sorted_combos else "3-ต่ำ"
 
@@ -438,9 +376,10 @@ if not raw_df.empty:
     best_confidence = estimated_probs[top_short_face]
     best_z = z_scores[top_short_face]
 
-    # --- 🎯 UPDATED SEPARATE BET LOGIC ---
+    # --- 🎯 UPDATED SEPARATE BET LOGIC (ปรับตรรกะใหม่ตามกติกาจริง) ---
     is_stat_significance = best_z >= 0.8 or last_seen[top_short_face] >= 7
     
+    # การแทงเต็งไม่กลัวตอง/11 ไฮโล
     if (best_confidence >= confidence_threshold) and is_stat_significance:
         single_action = "BET"
         single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
@@ -449,11 +388,12 @@ if not raw_df.empty:
         single_action = "SKIP"
         single_winrate = best_confidence * 100
 
+    # ประเมินความเสี่ยง ตอง / 11 ไฮโล (สำหรับคำแนะนำ สูง-ต่ำ)
     triple_count = (df["ผลลัพธ์ (Result)"] == "ตอง (Triple)").sum()
     risk_of_eleven_or_triple = (eleven_pct > 12.5) or (triple_count > 0 and (total_rounds - df[df["ผลลัพธ์ (Result)"] == "ตอง (Triple)"].index[-1]) <= 5 if triple_count > 0 else False)
 
     # --- 📈 WIN RATE CALCULATIONS ---
-    pair_win_rounds = best_pair_info["hits"]
+    pair_win_rounds = pair_counts.get(best_pair, 0)
     pair_winrate = (pair_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
 
     mix_win_rounds = combo_mix.get(best_combo, 0)
@@ -493,21 +433,14 @@ if not raw_df.empty:
             """, unsafe_allow_html=True)
 
     with rec_col2:
-        # อัปเดตการ์ดโต๊ดคู่เพื่อแสดงคำแนะนำ ยอดเงิน Kelly และสัญญาณ BET/SKIP
-        pair_signal_badge = "🟢 BET" if best_pair_info["signal"] == "BET" else "🔴 SKIP"
-        pair_color = "#059669" if best_pair_info["signal"] == "BET" else "#d97706"
-        
         st.markdown(f"""
         <div class="glow-card card-pair">
-            <div class="card-title">👯 โต๊ดคู่ (Pair + Kelly)</div>
+            <div class="card-title">👯 โต๊ดคู่ (Pair)</div>
             <div class="card-main-val">คู่ {best_pair[0]} - {best_pair[1]}</div>
-            <div class="card-winrate" style="background: {pair_color}22; color: {pair_color}; border-color: {pair_color}44;">
-                {pair_signal_badge} | แทง: {best_pair_info['bet_amount']:,} บาท
-            </div>
+            <div class="card-winrate">🎯 Win Rate: {pair_winrate:.1f}%</div>
             <div class="card-desc">
-                • <b>คำแนะนำ:</b> {best_pair_info['reason']}<br>
-                • <b>EMA Rate:</b> {best_pair_info['ema']*100:.1f}% (ปกติ 13.9%)<br>
-                • <b>สถิติ:</b> หายไปแล้ว {best_pair_info['streak']} ตา | ชนะ {pair_win_rounds}/{total_rounds} ตา ({pair_winrate:.1f}%)
+                • <b>ชนะในเกม:</b> ออกคู่กัน {pair_win_rounds} จาก {total_rounds} ตา<br>
+                • <b>ความฮอต:</b> เป็นคู่ที่สถิติสูงที่สุดในขณะนี้
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -548,9 +481,8 @@ if not raw_df.empty:
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- 5. DETAILED THEORY TABS ---
-    tab1, tab_ema, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 วิเคราะห์ 4 ทฤษฎีสถิติ", 
-        "🎲 วิเคราะห์ EMA & Kelly (โต๊ดคู่)",
         "📈 กราฟเปรียบเทียบสั้น-ยาว", 
         "📋 ตารางข้อมูลเรียลไทม์",
         "🎲 สถิติคู่ออกผสม"
@@ -598,26 +530,6 @@ if not raw_df.empty:
             st.write(f"* โอกาสออกผลซ้ำติดกัน (มังกร): **{streak_pct:.1f}%**")
             st.write(f"* โอกาสออกสลับฝั่ง (ปิงปอง): **{100 - streak_pct:.1f}%**")
 
-    with tab_ema:
-        st.subheader("🎲 ตารางวิเคราะห์ EMA & Kelly Criterion รายคู่โต๊ดทั้งหมด (15 คู่)")
-        st.caption("ระบบคำนวณเทรนด์ความถี่ระยะสั้น (EMA) ร่วมกับการบริหารเงินเดิมพันอัตโนมัติ")
-
-        ema_table_data = []
-        for p in all_pairs:
-            info = pair_ema_stats[p]
-            ema_table_data.append({
-                "คู่โต๊ด": f"{p[0]} - {p[1]}",
-                "สัญญาณ (Signal)": info["signal"],
-                "ยอดเดิมพันแนะนำ (บาท)": f"{info['bet_amount']:,} บาท" if info["signal"] == "BET" else "-",
-                "ค่า EMA (%)": f"{info['ema']*100:.1f}%",
-                "ไม่ได้ออกนาน (ตา)": info["streak"],
-                "จำนวนครั้งที่ออก": f"{info['hits']} ตา",
-                "เหตุผลวิเคราะห์": info["reason"]
-            })
-
-        ema_df = pd.DataFrame(ema_table_data)
-        st.dataframe(ema_df, use_container_width=True)
-
     with tab2:
         g_col1, g_col2 = st.columns(2)
         with g_col1:
@@ -655,4 +567,4 @@ if not raw_df.empty:
         st.dataframe(mix_df, use_container_width=True)
 
 else:
-    st.info("👈 เริ่มต้นกรอกชุดตัวเลขทางแถบซ้ายได้เลยครับ เช่น พิมพ์ `243 333 562 565` แล้วกดบันทึก")
+    st.info("👈 เริ่มต้นกรอกชุดตัวเลขทางแถบซ้ายได้เลยครับ เช่น พิมพ์ `243 333 562 565` แล้วกดบันทึก") 
