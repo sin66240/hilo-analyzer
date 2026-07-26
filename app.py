@@ -230,7 +230,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🎲 HI-LO STATISTICAL ANALYZER")
-st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎีประมวลผลเรียลไทม์ + ระบบกรองตาเล่น Skip Filter | สรุปช้อยส์เดิมพันเด่น (Google Sheets Real-time)")
+st.caption("ระบบวิเคราะห์สถิติลูกเต๋าไฮโล | 4 ทฤษฎี + Ping-Pong Auto Detector & Chop Index Filter | Google Sheets Real-time")
 
 # --- 2. SIDEBAR - FAST INPUT & SLIDER ---
 st.sidebar.markdown("### ⚡ บันทึกข้อมูลรวดเร็ว")
@@ -343,10 +343,37 @@ if not raw_df.empty:
 
     top_cold_face = max(last_seen, key=last_seen.get)
 
-    # --- 🧮 SMART & SHARP SKIP FILTER LOGIC ---
+    # --- 🧮 NEW: PING-PONG DETECTOR & CHOPINDEX GUARD LAYER ---
+    valid_results = df[df["ผลลัพธ์ (Result)"].isin(["สูง (High)", "ต่ำ (Low)"])]["ผลลัพธ์ (Result)"].tolist()
+    
+    pingpong_streak = 0
+    if len(valid_results) >= 2:
+        for i in range(len(valid_results) - 1, 0, -1):
+            if valid_results[i] != valid_results[i-1]:
+                pingpong_streak += 1
+            else:
+                break
+    
+    is_pingpong_mode = pingpong_streak >= 3
+    last_valid_res = valid_results[-1] if valid_results else "สูง (High)"
+    
+    if is_pingpong_mode:
+        pingpong_pred = "ต่ำ (Low)" if last_valid_res == "สูง (High)" else "สูง (High)"
+    else:
+        pingpong_pred = None
+
+    # คำนวณ Choppiness Index (วัดความผันผวนของการสลับฝั่ง)
+    recent_valid = valid_results[-min(len(valid_results), recent_n):]
+    changes = sum(1 for i in range(len(recent_valid)-1) if recent_valid[i] != recent_valid[i+1])
+    chop_ratio = changes / (len(recent_valid) - 1) if len(recent_valid) > 1 else 0.5
+    is_choppy_market = chop_ratio >= 0.65  # สลับกันบ่อยเกิน 65% ให้ถือว่าผันผวนสูง
+
+    # --- 🧮 WEIGHTED EXPONENTIAL CALCULATIONS ---
     n_recent = min(total_rounds, recent_n)
     
-    weights = np.exp(np.linspace(-2.0, 0, n_recent))
+    # ถ้าผันผวนสูง ปรับ Decay Rate ของ EMA ให้ Smooth ขึ้น (ลดน้ำหนักลูกเต๋าล่าสุดลง)
+    decay_factor = -1.0 if is_choppy_market else -2.0
+    weights = np.exp(np.linspace(decay_factor, 0, n_recent))
     weights /= weights.sum()
 
     recent_rounds = df.tail(n_recent)
@@ -376,11 +403,11 @@ if not raw_df.empty:
     best_confidence = estimated_probs[top_short_face]
     best_z = z_scores[top_short_face]
 
-    # --- 🎯 UPDATED SEPARATE BET LOGIC (ปรับตรรกะใหม่ตามกติกาจริง) ---
+    # --- 🎯 UPDATED SEPARATE BET LOGIC (พร้อม Chop Index Filter) ---
     is_stat_significance = best_z >= 0.8 or last_seen[top_short_face] >= 7
     
-    # การแทงเต็งไม่กลัวตอง/11 ไฮโล
-    if (best_confidence >= confidence_threshold) and is_stat_significance:
+    # ถ้าตลาดผันผวนสูง (Chop Index) และไม่มีเค้าปิงปอง ให้สั่ง SKIP เต็ง
+    if (best_confidence >= confidence_threshold) and is_stat_significance and not is_choppy_market:
         single_action = "BET"
         single_win_rounds = df[(df["ลูกที่ 1"] == top_short_face) | (df["ลูกที่ 2"] == top_short_face) | (df["ลูกที่ 3"] == top_short_face)].shape[0]
         single_winrate = (single_win_rounds / total_rounds) * 100 if total_rounds > 0 else 0
@@ -388,7 +415,7 @@ if not raw_df.empty:
         single_action = "SKIP"
         single_winrate = best_confidence * 100
 
-    # ประเมินความเสี่ยง ตอง / 11 ไฮโล (สำหรับคำแนะนำ สูง-ต่ำ)
+    # ประเมินความเสี่ยง ตอง / 11 ไฮโล
     triple_count = (df["ผลลัพธ์ (Result)"] == "ตอง (Triple)").sum()
     risk_of_eleven_or_triple = (eleven_pct > 12.5) or (triple_count > 0 and (total_rounds - df[df["ผลลัพธ์ (Result)"] == "ตอง (Triple)"].index[-1]) <= 5 if triple_count > 0 else False)
 
@@ -419,11 +446,12 @@ if not raw_df.empty:
             </div>
             """, unsafe_allow_html=True)
         else:
+            skip_reason = "สภาวะเต๋าผันผวนสูง (Choppy Market)" if is_choppy_market else "ไม่ผ่าน Double-Gate"
             st.markdown(f"""
             <div class="glow-card card-single-skip">
                 <div class="card-title">🎲 เต็งเด่น (Single)</div>
                 <div class="card-main-val">⏸️ SKIP (ข้าม)</div>
-                <div class="card-status-skip">⚠️ Conf: {best_confidence*100:.1f}% (ไม่ผ่าน Double-Gate)</div>
+                <div class="card-status-skip">⚠️ {skip_reason}</div>
                 <div class="card-desc">
                     • <b>สถานะ:</b> <span style="color: #d97706; font-weight: bold;">ทรงเต๋ายังไม่นิ่ง ชะลอเดิมพัน</span><br>
                     • <b>คำแนะนำ:</b> ข้ามตานี้ไปก่อนเพื่อรักษา Win Rate รวม<br>
@@ -433,17 +461,30 @@ if not raw_df.empty:
             """, unsafe_allow_html=True)
 
     with rec_col2:
-        st.markdown(f"""
-        <div class="glow-card card-pair">
-            <div class="card-title">👯 โต๊ดคู่ (Pair)</div>
-            <div class="card-main-val">คู่ {best_pair[0]} - {best_pair[1]}</div>
-            <div class="card-winrate">🎯 Win Rate: {pair_winrate:.1f}%</div>
-            <div class="card-desc">
-                • <b>ชนะในเกม:</b> ออกคู่กัน {pair_win_rounds} จาก {total_rounds} ตา<br>
-                • <b>ความฮอต:</b> เป็นคู่ที่สถิติสูงที่สุดในขณะนี้
+        if is_pingpong_mode:
+            st.markdown(f"""
+            <div class="glow-card card-pair">
+                <div class="card-title">🔄 ทรงเค้าไพ่ / เต๋า (Pattern)</div>
+                <div class="card-main-val">🏓 ปิงปอง {pingpong_streak} ตา</div>
+                <div class="card-winrate">🔥 แทงสลับ: {pingpong_pred.split()[0]}</div>
+                <div class="card-desc">
+                    • <b>ตรวจพบ:</b> สลับ สูง-ต่ำ ติดกัน {pingpong_streak} ตาแล้ว<br>
+                    • <b>กลยุทธ์:</b> ระบบปิด EMA ชั่วคราว แนะนำแทง **{pingpong_pred.split()[0]}** ตามเค้า
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="glow-card card-pair">
+                <div class="card-title">👯 โต๊ดคู่ (Pair)</div>
+                <div class="card-main-val">คู่ {best_pair[0]} - {best_pair[1]}</div>
+                <div class="card-winrate">🎯 Win Rate: {pair_winrate:.1f}%</div>
+                <div class="card-desc">
+                    • <b>ชนะในเกม:</b> ออกคู่กัน {pair_win_rounds} จาก {total_rounds} ตา<br>
+                    • <b>ความฮอต:</b> เป็นคู่ที่สถิติสูงที่สุดในขณะนี้
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
     with rec_col3:
         st.markdown(f"""
@@ -522,13 +563,15 @@ if not raw_df.empty:
             else:
                 st.info("⚖️ กระดานมีความสมดุล")
 
-            st.markdown("#### 4️⃣ Markov Chain (การเปลี่ยนสถานะ)")
+            st.markdown("#### 4️⃣ Markov Chain & Pattern Detector (เค้าปิงปอง/มังกร)")
             df["ผลลัพธ์_ก่อนหน้า"] = df["ผลลัพธ์ (Result)"].shift(1)
             same_trend = (df["ผลลัพธ์ (Result)"] == df["ผลลัพธ์_ก่อนหน้า"]).sum()
             total_transitions = total_rounds - 1
             streak_pct = (same_trend / total_transitions * 100) if total_transitions > 0 else 0
             st.write(f"* โอกาสออกผลซ้ำติดกัน (มังกร): **{streak_pct:.1f}%**")
             st.write(f"* โอกาสออกสลับฝั่ง (ปิงปอง): **{100 - streak_pct:.1f}%**")
+            st.write(f"* สถานะเค้าปิงปองสลับติดกันปัจจุบัน: **{pingpong_streak} ตา**")
+            st.write(f"* ค่าดัชนีผันผวน Choppiness Index: **{chop_ratio*100:.1f}%**")
 
     with tab2:
         g_col1, g_col2 = st.columns(2)
@@ -567,4 +610,4 @@ if not raw_df.empty:
         st.dataframe(mix_df, use_container_width=True)
 
 else:
-    st.info("👈 เริ่มต้นกรอกชุดตัวเลขทางแถบซ้ายได้เลยครับ เช่น พิมพ์ `243 333 562 565` แล้วกดบันทึก") 
+    st.info("👈 เริ่มต้นกรอกชุดตัวเลขทางแถบซ้ายได้เลยครับ เช่น พิมพ์ `243 333 562 565` แล้วกดบันทึก")
