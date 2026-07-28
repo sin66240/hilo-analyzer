@@ -184,13 +184,12 @@ if st.session_state.last_bet_result:
         st.warning(res["msg"])
 
 # ==========================================
-# 5. STATS DISPLAY & MATH ANALYSIS ENGINE
+# 5. MATH ANALYSIS ENGINE (Recommendations)
 # ==========================================
 history_df = pd.DataFrame(st.session_state.history)
 total_rounds = len(history_df)
 
 st.divider()
-st.subheader(f"📊 ประวัติและวิเคราะห์ผล (บันทึกแล้ว {total_rounds} ตา)")
 
 if total_rounds < 25:
     st.info(f"⏳ **ระบบกำลังสะสมสถิติ (Warm-Up Phase):** ต้องการอีก {25 - total_rounds} ตา เพื่อเริ่มวิเคราะห์ด้วยระบบคณิตศาสตร์ขั้นสูง")
@@ -199,8 +198,6 @@ else:
     st.session_state.betting_started = True
 
 if total_rounds > 0:
-    st.dataframe(history_df.tail(15), use_container_width=True)
-
     if total_rounds >= 5:
         types = history_df["Type"].tolist()
         states = ["Low", "High", "11-HiLo"]
@@ -233,7 +230,6 @@ if total_rounds > 0:
                 break
             recent_11_gap += 1
 
-        st.divider()
         st.subheader("🎯 คำแนะนำการเดิมพันตาถัดไป (Next Bet Recommendation)")
 
         if st.session_state.cooldown_counter > 0:
@@ -293,3 +289,11 @@ if total_rounds > 0:
                 "hilo11_active": hilo11_active,
                 "hilo11_unit": hilo11_bet_amount
             }
+
+# ==========================================
+# 6. STATS DISPLAY (ย้ายมาล่างสุด)
+# ==========================================
+if total_rounds > 0:
+    st.divider()
+    st.subheader(f"📊 ประวัติการกรอกสถิติ (บันทึกแล้ว {total_rounds} ตา)")
+    st.dataframe(history_df.tail(15), use_container_width=True)
