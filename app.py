@@ -9,17 +9,13 @@ import re
 st.set_page_config(page_title="Hi-Lo Automated Math System", page_icon="🎲", layout="wide")
 
 st.title("🎲 ระบบวิเคราะห์ไฮโลอัตโนมัติ (Automated Win/Loss & Bet Tracking)")
-st.caption("ระบบคำนวณแพ้/ชนะอัตโนมัติ + รองรับวางสถิติชุดใหญ่ + 4 สูตรคณิตศาสตร์ขั้นสูง + Stop-Loss")
+st.caption("ระบบคำนวณแพ้/ชนะอัตโนมัติ + รองรับวางสถิติชุดใหญ่ + 4 สูตรคณิตศาสตร์ขั้นสูง (ไม่มี Stop-Loss)")
 
 # Initialize Session State
 if "history" not in st.session_state:
     st.session_state.history = []
 if "betting_started" not in st.session_state:
     st.session_state.betting_started = False
-if "consecutive_losses" not in st.session_state:
-    st.session_state.consecutive_losses = 0
-if "cooldown_counter" not in st.session_state:
-    st.session_state.cooldown_counter = 0
 if "active_bet" not in st.session_state:
     st.session_state.active_bet = None
 if "last_bet_result" not in st.session_state:
@@ -69,8 +65,6 @@ st.sidebar.markdown(f"""
 if st.sidebar.button("🔄 รีเซ็ตระบบทั้งหมด"):
     st.session_state.history = []
     st.session_state.betting_started = False
-    st.session_state.consecutive_losses = 0
-    st.session_state.cooldown_counter = 0
     st.session_state.active_bet = None
     st.session_state.last_bet_result = None
     st.rerun()
@@ -163,39 +157,28 @@ if submit_btn and dice_input:
                 result_type = "Low"
                 
             if st.session_state.betting_started and st.session_state.active_bet:
-                if st.session_state.cooldown_counter > 0:
-                    st.session_state.cooldown_counter -= 1
+                net_pnl, total_bet = calculate_round_pnl(
+                    st.session_state.active_bet, 
+                    [d1, d2, d3], 
+                    total_sum, 
+                    result_type
+                )
+                
+                if net_pnl > 0:
                     st.session_state.last_bet_result = {
-                        "status": "WAIT", 
-                        "msg": f"⏸️ **อยู่ในช่วงพักสังเกตการณ์ (Stop-Loss)** เหลืออีก {st.session_state.cooldown_counter} ตา"
+                        "status": "WIN", 
+                        "msg": f"🎉 **ชนะ!** บวกสุทธิ +{net_pnl:,.0f} บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
+                    }
+                elif net_pnl == 0:
+                    st.session_state.last_bet_result = {
+                        "status": "DRAW", 
+                        "msg": f"⚖️ **เท่าทุน!** ได้-เสีย 0 บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
                     }
                 else:
-                    net_pnl, total_bet = calculate_round_pnl(
-                        st.session_state.active_bet, 
-                        [d1, d2, d3], 
-                        total_sum, 
-                        result_type
-                    )
-                    
-                    if net_pnl > 0:
-                        st.session_state.consecutive_losses = 0
-                        st.session_state.last_bet_result = {
-                            "status": "WIN", 
-                            "msg": f"🎉 **ชนะ!** บวกสุทธิ +{net_pnl:,.0f} บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
-                        }
-                    elif net_pnl == 0:
-                        st.session_state.last_bet_result = {
-                            "status": "DRAW", 
-                            "msg": f"⚖️ **เท่าทุน!** ได้-เสีย 0 บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
-                        }
-                    else:
-                        st.session_state.consecutive_losses += 1
-                        if st.session_state.consecutive_losses >= 2:
-                            st.session_state.cooldown_counter = 4
-                        st.session_state.last_bet_result = {
-                            "status": "LOSS", 
-                            "msg": f"💥 **แพ้!** ติดลบ -{abs(net_pnl):,.0f} บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
-                        }
+                    st.session_state.last_bet_result = {
+                        "status": "LOSS", 
+                        "msg": f"💥 **แพ้!** ติดลบ -{abs(net_pnl):,.0f} บาท (ผลออก {d1}-{d2}-{d3} = {total_sum})"
+                    }
 
             st.session_state.history.append({
                 "Round": len(st.session_state.history) + 1,
@@ -219,8 +202,6 @@ if st.session_state.last_bet_result:
         st.info(res["msg"])
     elif res["status"] == "LOSS":
         st.error(res["msg"])
-    else:
-        st.warning(res["msg"])
 
 # ==========================================
 # 5. MATH ANALYSIS ENGINE (Recommendations)
@@ -271,10 +252,7 @@ if total_rounds > 0:
 
         st.subheader("🎯 คำแนะนำการเดิมพันตาถัดไป (Next Bet Recommendation)")
 
-        if st.session_state.cooldown_counter > 0:
-            st.warning(f"🛑 **ระบบสั่งหยุดพัก (Stop-Loss Active):** แพ้ติดกัน ปิดการวางเงินอีก {st.session_state.cooldown_counter} ตา เพื่อรอกราฟนิ่ง")
-            st.session_state.active_bet = None
-        elif entropy > 1.25:
+        if entropy > 1.25:
             st.warning("⚠️ **Entropy สูงเกินไป (>1.25):** เค้าเต๋ามั่วและสลับผันผวน แนะนำให้ **พัก (WAIT)** ชั่วคราว")
             st.session_state.active_bet = None
         else:
