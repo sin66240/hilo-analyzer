@@ -99,10 +99,13 @@ st.markdown("""
     .card-pair { border-top: 4px solid #2563eb; }
     .card-pattern { border-top: 4px solid #7c3aed; }
     .card-eleven { border-top: 4px solid #dc2626; }
+    .card-stoploss-wait { border-top: 4px solid #ef4444; background: #fef2f2; }
+    .card-stoploss-bet { border-top: 4px solid #10b981; background: #f0fdf4; }
     .card-title { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 8px; }
     .card-main-val { font-size: 1.8rem; font-weight: 800; margin-bottom: 6px; }
     .card-winrate { font-size: 1rem; font-weight: 700; color: #10b981; background: #ecfdf5; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 10px; border: 1px solid #a7f3d0; }
     .card-status-skip { font-size: 0.95rem; font-weight: 700; color: #d97706; background: #fffbe2; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 10px; border: 1px solid #fde68a; }
+    .card-status-wait { font-size: 0.95rem; font-weight: 700; color: #dc2626; background: #fee2e2; padding: 4px 10px; border-radius: 20px; display: inline-block; margin-bottom: 10px; border: 1px solid #fca5a5; }
     .card-desc { font-size: 0.85rem; color: #475569; line-height: 1.5; }
 </style>
 """, unsafe_allow_html=True)
@@ -162,7 +165,7 @@ if st.sidebar.button("⚠️ ล้างประวัติข้อมูล
     st.sidebar.warning("ล้างประวัติข้อมูลเรียบร้อยแล้ว!")
     st.rerun()
 
-# --- 3. DATA PROCESSING ---
+# --- 3. DATA PROCESSING & STOP-LOSS ENGINE ---
 raw_df = load_data()
 
 if not raw_df.empty:
@@ -215,14 +218,13 @@ if not raw_df.empty:
     pair_with_top = {p: count for p, count in pair_counts.items() if top_short_face in p}
     best_pair_combo = max(pair_with_top, key=pair_with_top.get) if pair_with_top else (top_short_face, 2 if top_short_face!=2 else 1)
 
-    # 3. 🔍 🔥 PATTERN FOLLOWER ENGINE (ดักสถิติว่าหลังออกเลขชุดนี้ ตาต่อไปชอบออกโต๊ดอะไร)
+    # 3. 🔍 PATTERN FOLLOWER ENGINE
     last_round_dice = sorted([int(df.iloc[-1]["ลูกที่ 1"]), int(df.iloc[-1]["ลูกที่ 2"]), int(df.iloc[-1]["ลูกที่ 3"])])
     pattern_matched_pairs = {}
     pattern_match_count = 0
 
     for i in range(len(df) - 1):
         hist_dice = sorted([int(df.iloc[i]["ลูกที่ 1"]), int(df.iloc[i]["ลูกที่ 2"]), int(df.iloc[i]["ลูกที่ 3"])])
-        # ถ้าพบว่าประวัติในอดีต ออกเลขชุดเดียวกับตาล่าสุด (ไม่สนการเรียงลำดับ)
         if hist_dice == last_round_dice:
             pattern_match_count += 1
             next_row = df.iloc[i+1]
@@ -240,12 +242,56 @@ if not raw_df.empty:
     is_stat_significance = best_z >= 0.7 or last_seen[top_short_face] >= 6
     single_action = "BET" if (best_confidence >= confidence_threshold) and is_stat_significance else "SKIP"
 
-    # --- 4. DASHBOARD DISPLAY ---
+    # --- 4. 🛑 STOP-LOSS & BACKTESTING ENGINE (ระบบคำนวณย้อนหลังตรวจผลผิด 2 ตาติด) ---
+    results_history = []
+    
+    # วนลูปย้อนหลังเพื่อคำนวณสถานะ Win/Loss ของคู่โต๊ด
+    for idx in range(1, len(df)):
+        sub_df = df.iloc[:idx]
+        actual_dice = [int(df.iloc[idx]["ลูกที่ 1"]), int(df.iloc[idx]["ลูกที่ 2"]), int(df.iloc[idx]["ลูกที่ 3"])]
+        
+        # คำนวณคู่โต๊ดสถิติ ณ ตานั้น
+        sub_pair_counts = {}
+        for _, r in sub_df.iterrows():
+            d = sorted([int(r["ลูกที่ 1"]), int(r["ลูกที่ 2"]), int(r["ลูกที่ 3"])])
+            for p in [(d[0], d[1]), (d[1], d[2]), (d[0], d[2])]:
+                if p[0] != p[1]:
+                    sub_pair_counts[p] = sub_pair_counts.get(p, 0) + 1
+        
+        pred_pair = max(sub_pair_counts, key=sub_pair_counts.get) if sub_pair_counts else (1, 2)
+        
+        # ตรวจผลว่าเต๋าจริงออกคู่โต๊ดที่ทำนายไหม
+        is_win = (pred_pair[0] in actual_dice) and (pred_pair[1] in actual_dice)
+        results_history.append("ถูก" if is_win else "ผิด")
+
+    # ตรวจสอบสถานะการหยุดเล่น (Stop-Loss)
+    stop_loss_status = "✅ BET"
+    if len(results_history) >= 2:
+        if results_history[-1] == "ผิด" and results_history[-2] == "ผิด":
+            stop_loss_status = "🛑 WAIT"
+        elif len(results_history) >= 3 and results_history[-2] == "ผิด" and results_history[-3] == "ผิด" and results_history[-1] == "ผิด":
+            stop_loss_status = "🛑 WAIT"
+
+    # --- 5. DASHBOARD DISPLAY ---
     st.markdown("### 🎯 สรุปตัวเลือกเดิมพันแนะนำ (เต็ง + โต๊ด)")
+    
+    # แสดงป้ายเตือนใหญ่ถ้าเข้าเงื่อนไข Stop-Loss
+    if stop_loss_status == "🛑 WAIT":
+        st.error("🛑 **ระบบตัดไฟทำงาน (Stop-Loss):** สูตรคำนวณผิดติดต่อกัน 2 ตาแล้ว! **แนะนำให้หยุดพักรอ 3-5 ตา** เพื่อให้กราฟกลับเข้าสู่รูปแบบเดิมก่อนลงเงิน")
+
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        if single_action == "BET":
+        if stop_loss_status == "🛑 WAIT":
+            st.markdown(f"""
+            <div class="glow-card card-stoploss-wait">
+                <div class="card-title">🛡️ สถานะระบบ (System State)</div>
+                <div class="card-main-val" style="color: #dc2626;">🛑 STOP / WAIT</div>
+                <div class="card-status-wait">⚠️ ผิดติดกัน 2 ตาแล้ว</div>
+                <div class="card-desc">• <b>คำแนะนำ:</b> ห้ามลงเดิมพันตานี้ ให้สังเกตการณ์ไปก่อน</div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif single_action == "BET":
             st.markdown(f"""
             <div class="glow-card card-single">
                 <div class="card-title">🎲 เต็งเด่น (Single)</div>
