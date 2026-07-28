@@ -9,7 +9,7 @@ import re
 st.set_page_config(page_title="Hi-Lo Automated Math System", page_icon="🎲", layout="wide")
 
 st.title("🎲 ระบบวิเคราะห์ไฮโลอัตโนมัติ (Automated Win/Loss & Bet Tracking)")
-st.caption("ระบบคำนวณแพ้/ชนะอัตโนมัติ + รองรับวางสถิติชุดใหญ่ + 4 สูตรคณิตศาสตร์ขั้นสูง (ไม่มี Stop-Loss)")
+st.caption("ระบบคำนวณแพ้/ชนะอัตโนมัติ + วิเคราะห์ด้วย Runs Test, Markov Chain & Fractional Kelly (ปรับปรุงใหม่)")
 
 # Initialize Session State
 if "history" not in st.session_state:
@@ -45,7 +45,6 @@ if st.session_state.flash_effect:
         </style>
         <div class="flash-overlay"></div>
     """, unsafe_allow_html=True)
-    # Reset flag after showing
     st.session_state.flash_effect = False
 
 # ==========================================
@@ -70,10 +69,10 @@ if st.sidebar.button("🔄 รีเซ็ตระบบทั้งหมด")
     st.rerun()
 
 # ==========================================
-# 3. HELPER FUNCTIONS & ADVANCED MATH CALCULATIONS
+# 3. HELPER FUNCTIONS
 # ==========================================
 def parse_multiple_dice_inputs(input_text):
-    """ ดึงตัวเลข 1-6 ทั้งหมด ออกมาจัดกลุ่มละ 3 ตัว (รองรับหลายชุดพร้อมกัน) """
+    """ ดึงตัวเลข 1-6 ทั้งหมด ออกมาจัดกลุ่มละ 3 ตัว """
     all_digits = re.findall(r'[1-6]', input_text)
     parsed_groups = []
     for i in range(0, len(all_digits) - len(all_digits) % 3, 3):
@@ -116,7 +115,7 @@ def calculate_round_pnl(bet_info, dice_list, total_sum, result_type):
     return net_pnl, total_bet
 
 # ==========================================
-# 4. INPUT SECTION & AUTOMATED EVALUATION
+# 4. INPUT SECTION
 # ==========================================
 st.subheader("📥 ป้อนผลลูกเต๋า (กรอกทีละชุด หรือวางพร้อมกันหลายชุดก็ได้)")
 
@@ -129,17 +128,15 @@ with col_btn:
     submit_btn = st.button("บันทึกผลทั้งหมด 🎲", use_container_width=True, type="primary")
     undo_btn = st.button("ลบสถิติล่าสุด 🗑️", use_container_width=True)
 
-# ----------------- UNDO BUTTON LOGIC -----------------
 if undo_btn:
     if len(st.session_state.history) > 0:
-        st.session_state.history.pop()  # ลบรายการสุดท้ายทิ้ง
-        st.session_state.last_bet_result = None # ล้างผลลัพธ์การเล่นตาล่าสุดด้วยเพื่อไม่ให้สับสน
+        st.session_state.history.pop()
+        st.session_state.last_bet_result = None
         st.toast("🗑️ ลบสถิติตาล่าสุดเรียบร้อยแล้ว!")
         st.rerun()
     else:
         st.warning("⚠️ ไม่มีสถิติให้ลบครับ")
 
-# ----------------- SUBMIT BUTTON LOGIC -----------------
 if submit_btn and dice_input:
     dice_groups = parse_multiple_dice_inputs(dice_input)
     
@@ -188,7 +185,7 @@ if submit_btn and dice_input:
             })
             added_count += 1
 
-        st.session_state.flash_effect = True  # เปิดใช้งานเอฟเฟ็คแสงแว้บ
+        st.session_state.flash_effect = True
         st.toast(f"✅ บันทึกสถิติเพิ่มสำเร็จ {added_count} ชุด!", icon="🎲")
         st.rerun()
     else:
@@ -204,7 +201,7 @@ if st.session_state.last_bet_result:
         st.error(res["msg"])
 
 # ==========================================
-# 5. MATH ANALYSIS ENGINE (Recommendations)
+# 5. MATH ANALYSIS ENGINE (NEW: RUNS TEST REPLACEMENT)
 # ==========================================
 history_df = pd.DataFrame(st.session_state.history)
 total_rounds = len(history_df)
@@ -221,8 +218,9 @@ if total_rounds > 0:
     if total_rounds >= 5:
         types = history_df["Type"].tolist()
         states = ["Low", "High", "11-HiLo"]
-        transition_counts = {s1: {s2: 0 for s2 in states} for s1 in states}
         
+        # 1. Markov Chain Transition Matrix
+        transition_counts = {s1: {s2: 0 for s2 in states} for s1 in states}
         for i in range(len(types) - 1):
             s_curr = types[i]
             s_next = types[i+1]
@@ -237,13 +235,35 @@ if total_rounds > 0:
         for s in states:
             markov_probs[s] = (current_transitions[s] / sum_trans) if sum_trans > 0 else 0.333
 
+        # 2. Exponential Decay Weighting
         decay_factor = np.exp(-0.1 * np.arange(total_rounds)[::-1])
         weighted_high = np.sum((history_df["Type"] == "High") * decay_factor) / np.sum(decay_factor)
         weighted_low = np.sum((history_df["Type"] == "Low") * decay_factor) / np.sum(decay_factor)
         
-        recent_7 = history_df["Type"].tail(7).value_counts(normalize=True)
-        entropy = -np.sum(recent_7 * np.log2(recent_7 + 1e-9))
-        
+        # 3. [NEW REPLACEMENT] Wald-Wolfowitz Runs Test for Sequential Randomness
+        recent_10 = [t for t in types[-10:] if t in ["High", "Low"]]
+        n1 = recent_10.count("High")
+        n2 = recent_10.count("Low")
+        n_total = len(recent_10)
+
+        # นับจำนวน Runs (การเปลี่ยนสลับฝั่ง)
+        runs = 1
+        for i in range(1, len(recent_10)):
+            if recent_10[i] != recent_10[i-1]:
+                runs += 1
+
+        is_choppy = False
+        if n1 > 0 and n2 > 0 and n_total >= 6:
+            expected_runs = ((2 * n1 * n2) / n_total) + 1
+            var_runs = (2 * n1 * n2 * (2 * n1 * n2 - n_total)) / ((n_total ** 2) * (n_total - 1))
+            sd_runs = np.sqrt(var_runs) if var_runs > 0 else 1e-9
+            z_score = (runs - expected_runs) / sd_runs
+
+            # ถ้า Z-Score > 1.65 แสดงว่าสลับไปสลับมามั่วผิดปกติ (Choppy / Irregular)
+            if z_score > 1.65:
+                is_choppy = True
+
+        # 4. 11-HiLo Gap Counter
         recent_11_gap = 0
         for t in reversed(types):
             if t == "11-HiLo":
@@ -252,8 +272,8 @@ if total_rounds > 0:
 
         st.subheader("🎯 คำแนะนำการเดิมพันตาถัดไป (Next Bet Recommendation)")
 
-        if entropy > 1.25:
-            st.warning("⚠️ **Entropy สูงเกินไป (>1.25):** เค้าเต๋ามั่วและสลับผันผวน แนะนำให้ **พัก (WAIT)** ชั่วคราว")
+        if is_choppy:
+            st.warning("⚠️ **ตรวจพบเค้าเต๋าสลับผันผวนมั่ว ไร้ทิศทาง (Choppy Runs Test Z > 1.65):** แนะนำให้ **พักสังเกตการณ์ (WAIT)** ในตานี้")
             st.session_state.active_bet = None
         else:
             prob_high = (markov_probs["High"] * 0.6) + (weighted_high * 0.4)
@@ -266,6 +286,7 @@ if total_rounds > 0:
                 predicted_next_state = "Low"
                 win_prob = prob_low
 
+            # Fractional Kelly Criterion
             b_main = 1.0
             p_main = win_prob
             q_main = 1 - p_main
@@ -308,7 +329,7 @@ if total_rounds > 0:
             }
 
 # ==========================================
-# 6. STATS DISPLAY (อยู่ล่างสุด)
+# 6. STATS DISPLAY
 # ==========================================
 if total_rounds > 0:
     st.divider()
