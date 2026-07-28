@@ -24,6 +24,33 @@ if "active_bet" not in st.session_state:
     st.session_state.active_bet = None
 if "last_bet_result" not in st.session_state:
     st.session_state.last_bet_result = None
+if "flash_effect" not in st.session_state:
+    st.session_state.flash_effect = False
+
+# --- Flash Effect CSS Injection ---
+if st.session_state.flash_effect:
+    st.markdown("""
+        <style>
+        @keyframes flash-animation {
+            0% { background-color: rgba(255, 255, 255, 0); }
+            20% { background-color: rgba(255, 255, 255, 0.85); box-shadow: 0 0 100px rgba(255, 255, 255, 1); }
+            100% { background-color: rgba(255, 255, 255, 0); }
+        }
+        .flash-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 999999;
+            animation: flash-animation 0.6s ease-out;
+        }
+        </style>
+        <div class="flash-overlay"></div>
+    """, unsafe_allow_html=True)
+    # Reset flag after showing
+    st.session_state.flash_effect = False
 
 # ==========================================
 # 2. SIDEBAR: MONEY MANAGEMENT & SYSTEM CONTROL
@@ -105,9 +132,20 @@ with col_in:
 
 with col_btn:
     st.write("") 
-    st.write("")
-    submit_btn = st.button("บันทึกผลทั้งหมด 🎲", use_container_width=True)
+    submit_btn = st.button("บันทึกผลทั้งหมด 🎲", use_container_width=True, type="primary")
+    undo_btn = st.button("ลบสถิติล่าสุด 🗑️", use_container_width=True)
 
+# ----------------- UNDO BUTTON LOGIC -----------------
+if undo_btn:
+    if len(st.session_state.history) > 0:
+        st.session_state.history.pop()  # ลบรายการสุดท้ายทิ้ง
+        st.session_state.last_bet_result = None # ล้างผลลัพธ์การเล่นตาล่าสุดด้วยเพื่อไม่ให้สับสน
+        st.toast("🗑️ ลบสถิติตาล่าสุดเรียบร้อยแล้ว!")
+        st.rerun()
+    else:
+        st.warning("⚠️ ไม่มีสถิติให้ลบครับ")
+
+# ----------------- SUBMIT BUTTON LOGIC -----------------
 if submit_btn and dice_input:
     dice_groups = parse_multiple_dice_inputs(dice_input)
     
@@ -167,6 +205,7 @@ if submit_btn and dice_input:
             })
             added_count += 1
 
+        st.session_state.flash_effect = True  # เปิดใช้งานเอฟเฟ็คแสงแว้บ
         st.toast(f"✅ บันทึกสถิติเพิ่มสำเร็จ {added_count} ชุด!", icon="🎲")
         st.rerun()
     else:
@@ -291,7 +330,7 @@ if total_rounds > 0:
             }
 
 # ==========================================
-# 6. STATS DISPLAY (ย้ายมาล่างสุด)
+# 6. STATS DISPLAY (อยู่ล่างสุด)
 # ==========================================
 if total_rounds > 0:
     st.divider()
