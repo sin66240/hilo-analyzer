@@ -2,14 +2,15 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import re
+from collections import Counter
 
 # ==========================================
 # 1. PAGE SETUP & TITLE
 # ==========================================
-st.set_page_config(page_title="Hi-Lo Automated Math System", page_icon="🎲", layout="wide")
+st.set_page_config(page_title="Hi-Lo Full Range Math System", page_icon="🎲", layout="wide")
 
-st.title("🎲 ระบบวิเคราะห์ไฮโลอัตโนมัติ (Automated Win/Loss & Bet Tracking)")
-st.caption("ระบบคำนวณแพ้/ชนะอัตโนมัติ + วิเคราะห์ด้วย Runs Test, Markov Chain & Fractional Kelly (ปรับปรุงใหม่)")
+st.title("🎲 ระบบวิเคราะห์ไฮโลเต็มพิกัด (แต้มรวม 3-18 / โต๊ด / เบิ้ล)")
+st.caption("ระบบคำนวณอัตโนมัติ + รองรับแต้มรวม 3-18 เต็มรูปแบบ + วิเคราะห์โต๊ดคู่และเลขเบิ้ลด้วย Exponential Decay & Runs Test")
 
 # Initialize Session State
 if "history" not in st.session_state:
@@ -48,17 +49,17 @@ if st.session_state.flash_effect:
     st.session_state.flash_effect = False
 
 # ==========================================
-# 2. SIDEBAR: MONEY MANAGEMENT & SYSTEM CONTROL
+# 2. SIDEBAR: MONEY MANAGEMENT
 # ==========================================
 st.sidebar.header("💰 ระบบบริหารเงินทุน")
 
 capital = st.sidebar.number_input("กรอกเงินทุนปัจจุบัน (บาท):", min_value=100, value=1000, step=100)
 target_profit = capital * 0.30
-base_unit = max(20, round((capital * 0.035) / 10) * 10)
+base_unit = max(20, round((capital * 0.02) / 10) * 10)
 
 st.sidebar.markdown(f"""
 * **เป้าหมายกำไร (30%):** `{target_profit:,.0f}` บาท
-* **หน่วยลงเงินเบื้องต้น (3.5%):** `{base_unit:,.0f}` บาท
+* **หน่วยลงเงินเบื้องต้น (2%):** `{base_unit:,.0f}` บาท
 """)
 
 if st.sidebar.button("🔄 รีเซ็ตระบบทั้งหมด"):
@@ -69,47 +70,54 @@ if st.sidebar.button("🔄 รีเซ็ตระบบทั้งหมด")
     st.rerun()
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS & PAYOUT TABLES (3-18)
 # ==========================================
+SUM_PAYOUTS = {
+    3: 50.0, 18: 50.0,
+    4: 50.0, 17: 50.0,
+    5: 30.0, 16: 30.0,
+    6: 18.0, 15: 18.0,
+    7: 12.0, 14: 12.0,
+    8: 8.0, 13: 8.0,
+    9: 6.0, 12: 6.0,
+    10: 6.0, 11: 6.0
+}
+
 def parse_multiple_dice_inputs(input_text):
-    """ ดึงตัวเลข 1-6 ทั้งหมด ออกมาจัดกลุ่มละ 3 ตัว """
     all_digits = re.findall(r'[1-6]', input_text)
     parsed_groups = []
     for i in range(0, len(all_digits) - len(all_digits) % 3, 3):
         parsed_groups.append([int(all_digits[i]), int(all_digits[i+1]), int(all_digits[i+2])])
     return parsed_groups
 
-def calculate_round_pnl(bet_info, dice_list, total_sum, result_type):
-    main_target = bet_info.get("target")
-    main_unit = bet_info.get("main_unit", 0)
-    
-    combo_target = bet_info.get("combo_target")
+def calculate_round_pnl(bet_info, dice_list, total_sum):
+    combo_target = bet_info.get("combo_target") 
     combo_unit = bet_info.get("combo_unit", 0)
-    combo_odds = bet_info.get("combo_odds", 3.0)
-    
-    hilo11_active = bet_info.get("hilo11_active", False)
-    hilo11_unit = bet_info.get("hilo11_unit", 0)
-    
-    total_bet = main_unit + combo_unit + hilo11_unit
+    combo_odds = 5.0 
+
+    double_target = bet_info.get("double_target") 
+    double_unit = bet_info.get("double_unit", 0)
+    double_odds = 10.0 
+
+    sum_target = bet_info.get("sum_target") 
+    sum_unit = bet_info.get("sum_unit", 0)
+    sum_odds = SUM_PAYOUTS.get(sum_target, 6.0)
+
+    total_bet = combo_unit + double_unit + sum_unit
     total_payout = 0
 
-    if result_type == main_target:
-        total_payout += main_unit * 2
-
     if combo_target:
-        win_combo = False
-        if combo_target == "1-ต่ำ" and (total_sum <= 10) and (1 in dice_list): win_combo = True
-        elif combo_target == "6-สูง" and (total_sum >= 12) and (6 in dice_list): win_combo = True
-        elif combo_target == "4-สูง" and (total_sum >= 12) and (4 in dice_list): win_combo = True
-        elif combo_target == "3-ต่ำ" and (total_sum <= 10) and (3 in dice_list): win_combo = True
-        elif combo_target == "6-ต่ำ" and (total_sum <= 10) and (6 in dice_list): win_combo = True
-        elif combo_target == "5-ต่ำ" and (total_sum <= 10) and (5 in dice_list): win_combo = True
-        
-        if win_combo:
+        n1, n2 = map(int, combo_target.split("-"))
+        if (n1 in dice_list) and (n2 in dice_list):
             total_payout += combo_unit * (combo_odds + 1)
 
-    if hilo11_active and total_sum == 11:
-        total_payout += hilo11_unit * (7 + 1)
+    if double_target:
+        d_num = int(double_target.split("-")[0])
+        if dice_list.count(d_num) >= 2:
+            total_payout += double_unit * (double_odds + 1)
+
+    if sum_target and total_sum == sum_target:
+        total_payout += sum_unit * (sum_odds + 1)
 
     net_pnl = total_payout - total_bet
     return net_pnl, total_bet
@@ -121,7 +129,7 @@ st.subheader("📥 ป้อนผลลูกเต๋า (กรอกที�
 
 col_in, col_btn = st.columns([3, 1])
 with col_in:
-    dice_input = st.text_area("วางผลเต๋า เช่น '123 654 112 456' หรือวางต่อกันหลายๆ บรรทัดได้เลย:", key="dice_input_key", height=100)
+    dice_input = st.text_area("วางผลเต๋า เช่น '123 654 556 214' หรือวางต่อกันหลายๆ บรรทัดได้เลย:", key="dice_input_key", height=100)
 
 with col_btn:
     st.write("") 
@@ -146,19 +154,11 @@ if submit_btn and dice_input:
             d1, d2, d3 = parsed_dice
             total_sum = d1 + d2 + d3
             
-            if total_sum == 11:
-                result_type = "11-HiLo"
-            elif total_sum >= 12:
-                result_type = "High"
-            else:
-                result_type = "Low"
-                
             if st.session_state.betting_started and st.session_state.active_bet:
                 net_pnl, total_bet = calculate_round_pnl(
                     st.session_state.active_bet, 
                     [d1, d2, d3], 
-                    total_sum, 
-                    result_type
+                    total_sum
                 )
                 
                 if net_pnl > 0:
@@ -180,8 +180,7 @@ if submit_btn and dice_input:
             st.session_state.history.append({
                 "Round": len(st.session_state.history) + 1,
                 "D1": d1, "D2": d2, "D3": d3,
-                "Sum": total_sum,
-                "Type": result_type
+                "Sum": total_sum
             })
             added_count += 1
 
@@ -201,132 +200,83 @@ if st.session_state.last_bet_result:
         st.error(res["msg"])
 
 # ==========================================
-# 5. MATH ANALYSIS ENGINE (NEW: RUNS TEST REPLACEMENT)
+# 5. MATH ENGINE (3-18 TOTALS + COMBO + DOUBLES)
 # ==========================================
 history_df = pd.DataFrame(st.session_state.history)
 total_rounds = len(history_df)
 
 st.divider()
 
-if total_rounds < 25:
-    st.info(f"⏳ **ระบบกำลังสะสมสถิติ (Warm-Up Phase):** ต้องการอีก {25 - total_rounds} ตา เพื่อเริ่มวิเคราะห์ด้วยระบบคณิตศาสตร์ขั้นสูง")
+if total_rounds < 15:
+    st.info(f"⏳ **ระบบกำลังสะสมสถิติ (Warm-Up Phase):** ต้องการอีก {15 - total_rounds} ตา เพื่อเริ่มคำนวณสูตรโต๊ด/เบิ้ล/แต้มรวม 3-18")
     st.session_state.betting_started = False
 else:
     st.session_state.betting_started = True
 
-if total_rounds > 0:
-    if total_rounds >= 5:
-        types = history_df["Type"].tolist()
-        states = ["Low", "High", "11-HiLo"]
+if total_rounds >= 15:
+    decay = np.exp(-0.08 * np.arange(total_rounds)[::-1])
+    combo_counts = Counter()
+    double_counts = Counter()
+    sum_counts = Counter()
+
+    for idx, row in history_df.iterrows():
+        d_list = sorted([row["D1"], row["D2"], row["D3"]])
+        w = decay[idx]
         
-        # 1. Markov Chain Transition Matrix
-        transition_counts = {s1: {s2: 0 for s2 in states} for s1 in states}
-        for i in range(len(types) - 1):
-            s_curr = types[i]
-            s_next = types[i+1]
-            if s_curr in states and s_next in states:
-                transition_counts[s_curr][s_next] += 1
-                
-        last_state = types[-1]
-        current_transitions = transition_counts[last_state]
-        sum_trans = sum(current_transitions.values())
-        
-        markov_probs = {}
-        for s in states:
-            markov_probs[s] = (current_transitions[s] / sum_trans) if sum_trans > 0 else 0.333
-
-        # 2. Exponential Decay Weighting
-        decay_factor = np.exp(-0.1 * np.arange(total_rounds)[::-1])
-        weighted_high = np.sum((history_df["Type"] == "High") * decay_factor) / np.sum(decay_factor)
-        weighted_low = np.sum((history_df["Type"] == "Low") * decay_factor) / np.sum(decay_factor)
-        
-        # 3. [NEW REPLACEMENT] Wald-Wolfowitz Runs Test for Sequential Randomness
-        recent_10 = [t for t in types[-10:] if t in ["High", "Low"]]
-        n1 = recent_10.count("High")
-        n2 = recent_10.count("Low")
-        n_total = len(recent_10)
-
-        # นับจำนวน Runs (การเปลี่ยนสลับฝั่ง)
-        runs = 1
-        for i in range(1, len(recent_10)):
-            if recent_10[i] != recent_10[i-1]:
-                runs += 1
-
-        is_choppy = False
-        if n1 > 0 and n2 > 0 and n_total >= 6:
-            expected_runs = ((2 * n1 * n2) / n_total) + 1
-            var_runs = (2 * n1 * n2 * (2 * n1 * n2 - n_total)) / ((n_total ** 2) * (n_total - 1))
-            sd_runs = np.sqrt(var_runs) if var_runs > 0 else 1e-9
-            z_score = (runs - expected_runs) / sd_runs
-
-            # ถ้า Z-Score > 1.65 แสดงว่าสลับไปสลับมามั่วผิดปกติ (Choppy / Irregular)
-            if z_score > 1.65:
-                is_choppy = True
-
-        # 4. 11-HiLo Gap Counter
-        recent_11_gap = 0
-        for t in reversed(types):
-            if t == "11-HiLo":
-                break
-            recent_11_gap += 1
-
-        st.subheader("🎯 คำแนะนำการเดิมพันตาถัดไป (Next Bet Recommendation)")
-
-        if is_choppy:
-            st.warning("⚠️ **ตรวจพบเค้าเต๋าสลับผันผวนมั่ว ไร้ทิศทาง (Choppy Runs Test Z > 1.65):** แนะนำให้ **พักสังเกตการณ์ (WAIT)** ในตานี้")
-            st.session_state.active_bet = None
-        else:
-            prob_high = (markov_probs["High"] * 0.6) + (weighted_high * 0.4)
-            prob_low = (markov_probs["Low"] * 0.6) + (weighted_low * 0.4)
-            
-            if prob_high > prob_low:
-                predicted_next_state = "High"
-                win_prob = prob_high
+        pairs = [(d_list[0], d_list[1]), (d_list[0], d_list[2]), (d_list[1], d_list[2])]
+        for p1, p2 in pairs:
+            if p1 != p2:
+                combo_counts[f"{p1}-{p2}"] += w
             else:
-                predicted_next_state = "Low"
-                win_prob = prob_low
-
-            # Fractional Kelly Criterion
-            b_main = 1.0
-            p_main = win_prob
-            q_main = 1 - p_main
-            kelly_f = max(0, (b_main * p_main - q_main) / b_main) * 0.15
-            
-            main_bet_amount = max(base_unit, round((capital * kelly_f) / 10) * 10) if kelly_f > 0 else base_unit
-            
-            hilo11_active = (recent_11_gap >= 7)
-            hilo11_bet_amount = max(20, round(main_bet_amount * 0.2 / 10) * 10) if hilo11_active else 0
-
-            combo_target = "6-สูง" if predicted_next_state == "High" else "1-ต่ำ"
-            combo_bet_amount = max(20, round(main_bet_amount * 0.3 / 10) * 10)
-            combo_odds = 3.0
-
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("ฝั่งหลักที่แนะนำ", predicted_next_state, f"มั่นใจ {win_prob*100:.1f}%")
-                st.write(f"👉 **วางเงินฝั่งหลัก:** `{main_bet_amount:,.0f}` บาท")
-            
-            with c2:
-                st.metric("หน้าควบเสริม (Combo)", combo_target)
-                st.write(f"👉 **วางเงินหน้าควบ:** `{combo_bet_amount:,.0f}` บาท (จ่าย 3 เท่า)")
+                double_counts[f"{p1}-{p1}"] += w
                 
-            with c3:
-                hilo_status = "⚠️ ควรดัก!" if hilo11_active else "ปกติ"
-                st.metric("สถิติ 11-ไฮโล", f"หายไป {recent_11_gap} ตา", hilo_status)
-                if hilo11_active:
-                    st.write(f"👉 **วางเงินดัก 11:** `{hilo11_bet_amount:,.0f}` บาท (จ่าย 7 เท่า)")
-                else:
-                    st.write("👉 **วางเงินดัก 11:** `-`")
+        sum_counts[row["Sum"]] += w
 
-            st.session_state.active_bet = {
-                "target": predicted_next_state,
-                "main_unit": main_bet_amount,
-                "combo_target": combo_target,
-                "combo_unit": combo_bet_amount,
-                "combo_odds": combo_odds,
-                "hilo11_active": hilo11_active,
-                "hilo11_unit": hilo11_bet_amount
-            }
+    top_combo = combo_counts.most_common(1)[0][0] if combo_counts else "5-6"
+    top_double = double_counts.most_common(1)[0][0] if double_counts else "6-6"
+    top_sum = sum_counts.most_common(1)[0][0] if sum_counts else 10
+    sum_odds_val = SUM_PAYOUTS.get(top_sum, 6.0)
+
+    # Runs Test ตรวจสอบความนิ่ง
+    recent_sums = history_df["Sum"].tail(10).tolist()
+    runs = 1
+    for i in range(1, len(recent_sums)):
+        if (recent_sums[i] >= 11) != (recent_sums[i-1] >= 11):
+            runs += 1
+
+    is_choppy = (runs >= 8)
+
+    st.subheader("🎯 คำแนะนำการเดิมพันตาถัดไป (Next Bet Recommendation)")
+
+    if is_choppy:
+        st.warning("⚠️ **กราฟเปลี่ยนหน้าผันผวนสูง (High Choppiness):** แนะนำให้ **พักสังเกตการณ์ (WAIT)** ในตานี้")
+        st.session_state.active_bet = None
+    else:
+        combo_unit = max(20, round(base_unit * 1.5 / 10) * 10)
+        double_unit = max(20, round(base_unit * 0.5 / 10) * 10)
+        sum_unit = max(20, round(base_unit * 0.8 / 10) * 10)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("🎲 โต๊ดคู่เต็ง (Combo)", top_combo)
+            st.write(f"👉 **วางเงินโต๊ดคู่:** `{combo_unit:,.0f}` บาท (จ่าย 5 เท่า)")
+        
+        with c2:
+            st.metric("👯 เลขเบิ้ลเต็ง (Double)", top_double)
+            st.write(f"👉 **วางเงินเบิ้ล:** `{double_unit:,.0f}` บาท (จ่าย 10 เท่า)")
+            
+        with c3:
+            st.metric("🎯 แต้มรวมเป้าหมาย (3-18)", f"{top_sum} แต้ม")
+            st.write(f"👉 **วางเงินแต้มรวม:** `{sum_unit:,.0f}` บาท (จ่าย {sum_odds_val:,.0f} เท่า)")
+
+        st.session_state.active_bet = {
+            "combo_target": top_combo,
+            "combo_unit": combo_unit,
+            "double_target": top_double,
+            "double_unit": double_unit,
+            "sum_target": top_sum,
+            "sum_unit": sum_unit
+        }
 
 # ==========================================
 # 6. STATS DISPLAY
