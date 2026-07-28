@@ -3,15 +3,14 @@ import numpy as np
 import pandas as pd
 import re
 from collections import Counter
-from scipy.stats import chisquare, poisson
 
 # ==========================================
 # 1. PAGE SETUP & TITLE
 # ==========================================
 st.set_page_config(page_title="Hi-Lo Ultimate Math System", page_icon="🎲", layout="wide")
 
-st.title("🎲 ระบบวิเคราะห์ไฮโลขั้นสูง (Full-Range Chi-Square, Poisson & Runs Test)")
-st.caption("ระบบคำนวณอัตโนมัติ + รองรับแต้มรวม 3-18 + โต๊ด / เบิ้ล + ขั้นตอนวิเคราะห์เชิงสถิติขั้นสูงแบบจัดเต็ม")
+st.title("🎲 ระบบวิเคราะห์ไฮโลขั้นสูง (Full-Range Poisson, Runs Test & Decay)")
+st.caption("ระบบคำนวณอัตโนมัติ + รองรับแต้มรวม 3-18 + โต๊ด / เบิ้ล + สถิติความถี่แม่นยำสูง")
 
 # Initialize Session State
 if "history" not in st.session_state:
@@ -82,17 +81,6 @@ SUM_PAYOUTS = {
     8: 8.0, 13: 8.0,
     9: 6.0, 12: 6.0,
     10: 6.0, 11: 6.0
-}
-
-THEORETICAL_SUM_PROBS = {
-    3: 1/216, 18: 1/216,
-    4: 3/216, 17: 3/216,
-    5: 6/216, 16: 6/216,
-    6: 10/216, 15: 10/216,
-    7: 15/216, 14: 15/216,
-    8: 21/216, 13: 21/216,
-    9: 25/216, 12: 25/216,
-    10: 27/216, 11: 27/216
 }
 
 def parse_multiple_dice_inputs(input_text):
@@ -257,10 +245,6 @@ if total_rounds >= 15:
     top_sum = sum_counts.most_common(1)[0][0] if sum_counts else 10
     sum_odds_val = SUM_PAYOUTS.get(top_sum, 6.0)
 
-    observed_freqs = [sum_counts.get(s, 0.1) for s in range(3, 19)]
-    expected_freqs = [total_rounds * THEORETICAL_SUM_PROBS[s] for s in range(3, 19)]
-    chi2_val, p_value = chisquare(f_obs=observed_freqs, f_exp=expected_freqs)
-
     recent_sums = history_df["Sum"].tail(10).tolist()
     runs = 1
     for i in range(1, len(recent_sums)):
@@ -290,7 +274,7 @@ if total_rounds >= 15:
             st.write(f"👉 **วางเงินเบิ้ล:** `{double_unit:,.0f}` บาท (จ่าย 10 เท่า)")
             
         with c3:
-            st.metric("🎯 แต้มรวมเป้าหมาย (3-18)", f"{top_sum} แต้ม", f"Chi2 p={p_value:.2f}")
+            st.metric("🎯 แต้มรวมเป้าหมาย (3-18)", f"{top_sum} แต้ม")
             st.write(f"👉 **วางเงินแต้มรวม:** `{sum_unit:,.0f}` บาท (จ่าย {sum_odds_val:,.0f} เท่า)")
 
         st.session_state.active_bet = {
